@@ -41,9 +41,11 @@ def init_params(net):
             if m.bias:
                 init.constant(m.bias, 0)
 
-
-_, term_width = os.popen('stty size', 'r').read().split()
-term_width = int(term_width)
+try:
+    _, term_width = os.popen('stty size', 'r').read().split()
+    term_width = int(term_width)
+except BaseException:
+    term_width = None
 
 TOTAL_BAR_LENGTH = 65.
 last_time = time.time()
@@ -52,6 +54,14 @@ def progress_bar(current, total, msg=None):
     global last_time, begin_time
     if current == 0:
         begin_time = time.time()  # Reset for new bar.
+
+    if term_width is None:
+        if current >= total - 1:
+            L = []
+            L.append('Time: %s' % format_time(time.time() - begin_time))
+            if msg: L.append(' | ' + msg)
+            sys.stdout.write("".join(L) + "\n")
+        return
 
     cur_len = int(TOTAL_BAR_LENGTH*current/total)
     rest_len = int(TOTAL_BAR_LENGTH - cur_len) - 1
