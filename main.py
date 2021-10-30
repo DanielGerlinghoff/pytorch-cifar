@@ -3,92 +3,67 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
+from torch.utils.data import DataLoader
 
 import torchvision
 import torchvision.transforms as transforms
 
 import os
-import argparse
 
 from models import *
 from utils import progress_bar
 
 
-parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
-parser.add_argument('--resume', '-r', action='store_true',
-                    help='resume from checkpoint')
-args = parser.parse_args()
-
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-best_acc = 0  # best test accuracy
-start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+best_acc    = 0
+start_epoch = 0
 
 # Data
 print('==> Preparing data..')
-transform_train = transforms.Compose([
+transform_mnist28 = transforms.Compose([
+    transforms.ToTensor()])
+transform_mnist32 = transforms.Compose([
+    transforms.Resize((32, 32)),
+    transforms.ToTensor()])
+transform_cifar_train = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
     transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-])
+    transforms.ToTensor()])
+transform_cifar_test = transforms.Compose([
+    transforms.ToTensor()])
 
-transform_test = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-])
+# trainset = torchvision.datasets.mnist.MNIST('../data', train=True, download=True, transform=transform_mnist28)
+# testset  = torchvision.datasets.mnist.MNIST('../data', train=False, download=True, transform=transform_mnist28)
+# trainset = torchvision.datasets.mnist.MNIST('../data', train=True, download=True, transform=transform_mnist32)
+# testset  = torchvision.datasets.mnist.MNIST('../data', train=False, download=True, transform=transform_mnist32)
+# trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=True, transform=transform_cifar_train)
+# testset  = torchvision.datasets.CIFAR10(root='../data', train=False, download=True, transform=transform_cifar_test)
+trainset = torchvision.datasets.CIFAR100(root='../data', train=True, download=True, transform=transform_cifar_train)
+testset  = torchvision.datasets.CIFAR100(root='../data', train=False, download=True, transform=transform_cifar_test)
 
-trainset = torchvision.datasets.CIFAR10(
-    root='./data', train=True, download=True, transform=transform_train)
-trainloader = torch.utils.data.DataLoader(
-    trainset, batch_size=128, shuffle=True, num_workers=2)
-
-testset = torchvision.datasets.CIFAR10(
-    root='./data', train=False, download=True, transform=transform_test)
-testloader = torch.utils.data.DataLoader(
-    testset, batch_size=100, shuffle=False, num_workers=2)
-
-classes = ('plane', 'car', 'bird', 'cat', 'deer',
-           'dog', 'frog', 'horse', 'ship', 'truck')
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)
+testloader  = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
 
 # Model
 print('==> Building model..')
-# net = VGG('VGG19')
-# net = ResNet18()
-# net = PreActResNet18()
-# net = GoogLeNet()
-# net = DenseNet121()
-# net = ResNeXt29_2x64d()
-# net = MobileNet()
-# net = MobileNetV2()
-# net = DPN92()
-# net = ShuffleNetG2()
-# net = SENet18()
-# net = ShuffleNetV2(1)
-# net = EfficientNetB0()
-# net = RegNetX_200MF()
-net = SimpleDLA()
+# net = LeNet(num_classes=10)
+# net = Fang(num_classes=10)
+# net = AlexNet(batchnorm=True, num_classes=10)
+net = VGG('VGG11', batchnorm=True, num_classes=100)
+
 net = net.to(device)
 if device == 'cuda':
-    net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
-if args.resume:
-    # Load checkpoint.
-    print('==> Resuming from checkpoint..')
-    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/ckpt.pth')
-    net.load_state_dict(checkpoint['net'])
-    best_acc = checkpoint['acc']
-    start_epoch = checkpoint['epoch']
-
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(net.parameters(), lr=args.lr,
-                      momentum=0.9, weight_decay=5e-4)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
-
+for mod in net.modules():
+    if type(mod) is nn.Conv2d:
+        nn.init.xavier_uniform_(mod.weight)
 
 # Training
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.SGD(net.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+
 def train(epoch):
     print('\nEpoch: %d' % epoch)
     net.train()
@@ -132,22 +107,20 @@ def test(epoch):
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
-    # Save checkpoint.
+    # Save checkpoint
     acc = 100.*correct/total
     if acc > best_acc:
         print('Saving..')
-        state = {
-            'net': net.state_dict(),
-            'acc': acc,
-            'epoch': epoch,
-        }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/ckpt.pth')
+        torch.save(net.state_dict(), './checkpoint/ckpt.pth')
         best_acc = acc
 
 
+# Execution
 for epoch in range(start_epoch, start_epoch+200):
     train(epoch)
     test(epoch)
     scheduler.step()
+
+print("Best val. accuracy: ", best_acc)

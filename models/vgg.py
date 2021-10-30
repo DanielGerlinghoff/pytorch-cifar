@@ -12,36 +12,31 @@ cfg = {
 
 
 class VGG(nn.Module):
-    def __init__(self, vgg_name):
+    def __init__(self, vgg_name, batchnorm=False, num_classes=10):
         super(VGG, self).__init__()
-        self.features = self._make_layers(cfg[vgg_name])
-        self.classifier = nn.Linear(512, 10)
+        self.layer_list = self._make_layers(cfg[vgg_name], bn=batchnorm)
+        self.layer_list.append(nn.Flatten())
+        self.layer_list.append(nn.Linear(512, 4096, bias=False))
+        self.layer_list.append(nn.ReLU(inplace=True))
+        self.layer_list.append(nn.Linear(4096, 4096, bias=False))
+        self.layer_list.append(nn.ReLU(inplace=True))
+        self.layer_list.append(nn.Linear(4096, num_classes, bias=False))
+        self.layer_list.append(nn.LogSoftmax(dim=-1))
 
     def forward(self, x):
-        out = self.features(x)
-        out = out.view(out.size(0), -1)
-        out = self.classifier(out)
-        return out
+        for layer in self.layer_list:
+            x = layer(x)
+        return x
 
-    def _make_layers(self, cfg):
-        layers = []
+    def _make_layers(self, cfg, bn):
+        layers = nn.ModuleList()
         in_channels = 3
         for x in cfg:
             if x == 'M':
-                layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+                layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
             else:
-                layers += [nn.Conv2d(in_channels, x, kernel_size=3, padding=1),
-                           nn.BatchNorm2d(x),
-                           nn.ReLU(inplace=True)]
+                layers.append(nn.Conv2d(in_channels, x, kernel_size=3, padding=1, bias=False))
+                layers.append(nn.BatchNorm2d(x) if bn else nn.Identity())
+                layers.append(nn.ReLU(inplace=True))
                 in_channels = x
-        layers += [nn.AvgPool2d(kernel_size=1, stride=1)]
-        return nn.Sequential(*layers)
-
-
-def test():
-    net = VGG('VGG11')
-    x = torch.randn(2,3,32,32)
-    y = net(x)
-    print(y.size())
-
-# test()
+        return layers
